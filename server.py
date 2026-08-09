@@ -3,42 +3,36 @@ import requests
 
 app = FastAPI()
 
-# Standard Universal Coin List
-symbols = [
-    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'SHIBUSDT', 'DOTUSDT',
-    'LINKUSDT', 'NEARUSDT', 'TRXUSDT', 'MATICUSDT', 'BCHUSDT', 'UNIUSDT', 'LTCUSDT', 'PEPEUSDT', 'ICPUSDT', 'APTUSDT',
-    'SUIUSDT', 'LDOUSDT', 'FILUSDT', 'RENDERUSDT', 'HBARUSDT', 'ARBUSDT', 'VETUSDT', 'MKRUSDT', 'OPUSDT', 'GRTUSDT',
-    'INJUSDT', 'TIAUSDT', 'THETAUSDT', 'RUNEUSDT', 'FTMUSDT', 'AAVEUSDT', 'ALGOUSDT', 'FLOWUSDT', 'SANDUSDT', 'MANAUSDT'
-]
-
 @app.get("/api/live-prices")
 def get_live_prices():
     try:
-        # Binance Global Ticker API (Fast & Universal)
-        url = "https://api.binance.com/api/v3/ticker/24hr"
-        resp = requests.get(url, timeout=5)
-        data = resp.json()
-
-        data_dict = {item['symbol']: item for item in data if 'symbol' in item}
+        # CoinCap API (Render/AWS IP Block nahi hota)
+        url = "https://api.coincap.io/v2/assets?limit=50"
+        headers = {'Accept-Encoding': 'gzip'}
+        resp = requests.get(url, headers=headers, timeout=10)
+        data = resp.json().get('data', [])
 
         result = []
-        for sym in symbols:
-            if sym in data_dict:
-                item = data_dict[sym]
-                last_price = float(item.get('lastPrice', 0))
-                change_val = float(item.get('priceChangePercent', 0))
+        for item in data:
+            symbol = item.get('symbol', '').upper()
+            price = float(item.get('priceUsd', 0))
+            change = float(item.get('changePercent24Hr', 0))
 
-                # Display Name (Universal format: BTC/USDT)
-                base = sym.replace('USDT', '')
-                display_name = f"{base}/USDT"
-
-                result.append({
-                    'symbol': display_name,
-                    'price': f"{last_price:.4f}" if last_price < 1 else f"{last_price:.2f}",
-                    'isUp': change_val >= 0
-                })
+            result.append({
+                'symbol': f"{symbol}/USDT",
+                'price': f"{price:.4f}" if price < 1 else f"{price:.2f}",
+                'isUp': change >= 0
+            })
 
         return {"markets": result}
 
     except Exception as e:
-        return {"markets": [], "error": str(e)}
+        # Fallback dummy data agar API response slow ho
+        return {
+            "markets": [
+                {"symbol": "BTC/USDT", "price": "64250.00", "isUp": True},
+                {"symbol": "ETH/USDT", "price": "3450.50", "isUp": True},
+                {"symbol": "SOL/USDT", "price": "145.20", "isUp": False}
+            ],
+            "error": str(e)
+        }
