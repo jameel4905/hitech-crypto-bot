@@ -3,36 +3,37 @@ import requests
 
 app = FastAPI()
 
+# Standard Universal Coin List
+symbols = [
+    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'SHIBUSDT', 'DOTUSDT',
+    'LINKUSDT', 'NEARUSDT', 'TRXUSDT', 'MATICUSDT', 'BCHUSDT', 'UNIUSDT', 'LTCUSDT', 'PEPEUSDT', 'ICPUSDT', 'APTUSDT',
+    'SUIUSDT', 'LDOUSDT', 'FILUSDT', 'RENDERUSDT', 'HBARUSDT', 'ARBUSDT', 'VETUSDT', 'MKRUSDT', 'OPUSDT', 'GRTUSDT',
+    'INJUSDT', 'TIAUSDT', 'THETAUSDT', 'RUNEUSDT', 'FTMUSDT', 'AAVEUSDT', 'ALGOUSDT', 'FLOWUSDT', 'SANDUSDT', 'MANAUSDT'
+]
+
 @app.get("/api/live-prices")
 def get_live_prices():
     try:
-        # CoinDCX live ticker API call
-        resp = requests.get("https://api.coindcx.com/exchange/ticker")
+        # Binance Global Ticker API (Fast & Universal)
+        url = "https://api.binance.com/api/v3/ticker/24hr"
+        resp = requests.get(url, timeout=5)
         data = resp.json()
 
-        # CoinDCX ke exact market symbols
-        target_markets = [
-            'B-BTC_USDT', 'B-ETH_USDT', 'B-BNB_USDT', 'B-SOL_USDT', 'B-XRP_USDT', 
-            'B-ADA_USDT', 'B-DOGE_USDT', 'B-AVAX_USDT', 'B-SHIB_USDT', 'B-DOT_USDT',
-            'B-LINK_USDT', 'B-NEAR_USDT', 'B-TRX_USDT', 'B-MATIC_USDT', 'B-BCH_USDT', 
-            'B-UNI_USDT', 'B-LTC_USDT', 'B-PEPE_USDT', 'B-ICP_USDT', 'B-APT_USDT',
-            'B-SUI_USDT', 'B-LDO_USDT', 'B-FIL_USDT', 'B-RENDER_USDT', 'B-HBAR_USDT', 
-            'B-ARB_USDT', 'B-VET_USDT', 'B-MKR_USDT', 'B-OP_USDT', 'B-GRT_USDT',
-            'B-INJ_USDT', 'B-TIA_USDT', 'B-THETA_USDT', 'B-RUNE_USDT', 'B-FTM_USDT', 
-            'B-AAVE_USDT', 'B-ALGO_USDT', 'B-FLOW_USDT', 'B-SAND_USDT', 'B-MANA_USDT'
-        ]
+        data_dict = {item['symbol']: item for item in data if 'symbol' in item}
 
         result = []
-        for item in data:
-            market_name = item.get('market', '')
-            if market_name in target_markets:
-                # App display format ke liye 'B-BTC_USDT' ko 'BTC/USDT' banana
-                clean_symbol = market_name.replace('B-', '').replace('_', '/')
-                last_price = float(item.get('last_price', 0))
-                change_val = float(item.get('change_24_hour', 0))
+        for sym in symbols:
+            if sym in data_dict:
+                item = data_dict[sym]
+                last_price = float(item.get('lastPrice', 0))
+                change_val = float(item.get('priceChangePercent', 0))
+
+                # Display Name (Universal format: BTC/USDT)
+                base = sym.replace('USDT', '')
+                display_name = f"{base}/USDT"
 
                 result.append({
-                    'symbol': clean_symbol,
+                    'symbol': display_name,
                     'price': f"{last_price:.4f}" if last_price < 1 else f"{last_price:.2f}",
                     'isUp': change_val >= 0
                 })
