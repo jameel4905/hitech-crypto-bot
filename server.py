@@ -17,7 +17,7 @@ app.add_middleware(
 )
 
 # Yahan apna Notepad wala edit kiya hua MongoDB link daalna!
-MONGO_URI = "mongodb+srv://jameelelctn:<JAmeel@#4905>@cluster0.jlfvi5y.mongodb.net/?appName=Cluster0"
+MONGO_URI = "mongodb+srv://jameelelctn:<JAmeel4905>@cluster0.jlfvi5y.mongodb.net/?appName=Cluster0"
 client = MongoClient(MONGO_URI)
 db = client['hitech_trading_db']
 trades_collection = db['trades']
