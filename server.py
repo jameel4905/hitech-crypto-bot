@@ -8,12 +8,13 @@ from datetime import datetime, timedelta
 app = FastAPI()
 
 # App CORS policy (Flutter connectivity ke liye)
+# Yeh wala code puraana replace kar do
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 # Yahan apna Notepad wala edit kiya hua MongoDB link daalna!
