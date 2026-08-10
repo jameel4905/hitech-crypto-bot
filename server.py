@@ -1,12 +1,12 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pymongo import MongoClient
 import requests
 import ccxt
 from datetime import datetime, timedelta
 
 app = FastAPI()
 
-# App CORS policy (Flutter connectivity ke liye)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,11 +15,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Trade History aur Daily Limit Store karne ke liye Database List
-trade_logs = [] 
+# Yahan in double quotes ke andar apna edit kiya hua link daalna hai
+MONGO_URI = "mongodb+srv://jameelelctn:<JAmeel@#4905>@cluster0.jlfvi5y.mongodb.net/?appName=Cluster0"
+client = MongoClient(MONGO_URI)
+db = client['hitech_trading_db']
+trades_collection = db['trades']
 
 # -------------------------------------------------------------
-# 1. LIVE PRICES ENDPOINT (Jo app mein abhi chal raha hai)
+# 1. LIVE PRICES (CoinCap se 50 Coins)
 # -------------------------------------------------------------
 @app.get("/api/live-prices")
 def get_live_prices():
@@ -40,49 +43,35 @@ def get_live_prices():
                 'price': f"{price:.4f}" if price < 1 else f"{price:.2f}",
                 'isUp': change >= 0
             })
-
         return {"markets": result}
-
     except Exception as e:
-        return {
-            "markets": [
-                {"symbol": "BTC/USDT", "price": "64250.00", "isUp": True},
-                {"symbol": "ETH/USDT", "price": "3450.50", "isUp": True}
-            ],
-            "error": str(e)
-        }
+        return {"markets": [], "error": str(e)}
 
 # -------------------------------------------------------------
-# 2. 24-HOUR TRADE LIMIT CHECK (Max 5 Trades)
+# 2. TRADE LIMIT CHECK & EXECUTE
 # -------------------------------------------------------------
 def check_trade_limit(user_id):
     now = datetime.utcnow()
     last_24h = now - timedelta(hours=24)
-    user_trades_24h = [t for t in trade_logs if t['user_id'] == user_id and t['timestamp'] > last_24h]
-    
-    if len(user_trades_24h) >= 5:
-        return False
-    return True
+    count = trades_collection.count_documents({
+        "user_id": user_id,
+        "timestamp": {"$gte": last_24h}
+    })
+    return count < 5
 
-# -------------------------------------------------------------
-# 3. MANUAL / BOT TRADE EXECUTION (Futures, Spot & Scalping)
-# -------------------------------------------------------------
 @app.post("/api/trade/execute")
 def execute_trade(data: dict):
-    user_id = data.get("user_id", "default_user")
+    user_id = data.get("user_id")
     broker = data.get("broker", "binance").lower()
-    symbol = data.get("symbol", "BTC/USDT")
-    side = data.get("side", "buy").lower()
-    amount = float(data.get("amount", 0.001))
+    symbol = data.get("symbol")
+    side = data.get("side")
+    amount = float(data.get("amount"))
     is_futures = data.get("is_futures", False)
-    leverage = int(data.get("leverage", 1))
 
-    # Guard: 5 Trades check
     if not check_trade_limit(user_id):
         return {"status": "error", "message": "24 ghante ki 5 trades ki limit poori ho chuki hai!"}
 
     try:
-        # Dynamic CCXT Exchange Initialization
         exchange_class = getattr(ccxt, broker)
         exchange = exchange_class({
             'apiKey': data.get("api_key"),
@@ -90,16 +79,8 @@ def execute_trade(data: dict):
             'options': {'defaultType': 'future' if is_futures else 'spot'}
         })
 
-        if is_futures and hasattr(exchange, 'set_leverage'):
-            try:
-                exchange.set_leverage(leverage, symbol)
-            except Exception as lev_err:
-                pass
-
-        # Order Execution
         order = exchange.create_order(symbol, 'market', side, amount)
 
-        # Log History
         trade_record = {
             "trade_id": str(order.get('id', 'N/A')),
             "user_id": user_id,
@@ -107,20 +88,18 @@ def execute_trade(data: dict):
             "side": side.upper(),
             "amount": amount,
             "price": order.get('price', 0),
-            "type": f"Futures {leverage}x" if is_futures else "Spot",
             "timestamp": datetime.utcnow()
         }
-        trade_logs.append(trade_record)
+        trades_collection.insert_one(trade_record)
 
-        return {"status": "success", "order": order, "trades_left": 5 - len([t for t in trade_logs if t['user_id'] == user_id])}
-
+        return {"status": "success", "order": order}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 # -------------------------------------------------------------
-# 4. TRADE HISTORY ENDPOINT
+# 3. TRADE HISTORY
 # -------------------------------------------------------------
 @app.get("/api/trade/history/{user_id}")
 def get_trade_history(user_id: str):
-    user_history = [t for t in trade_logs if t['user_id'] == user_id]
-    return {"history": user_history, "total_trades_today": len(user_history)}
+    history = list(trades_collection.find({"user_id": user_id}, {"_id": 0}))
+    return {"history": history}
