@@ -130,28 +130,29 @@ async def trailing_sl_background_worker():
     while True:
         try:
             async with httpx.AsyncClient() as client_http:
-                res = await client_http.get("https://api.coincap.io/v2/assets?limit=50")
-                coins = res.json().get("data", [])
-                price_map = {c['symbol'].lower(): float(c['priceUsd']) for c in coins}
+                res = await client_http.get("https://api.coincap.io/v2/assets?limit=50", timeout=10.0)
+                if res.status_code == 200:
+                    coins = res.json().get("data", [])
+                    price_map = {c['symbol'].lower(): float(c['priceUsd']) for c in coins}
 
-            # Saari OPEN trades uthao
-            open_trades = await trades_collection.find({"status": "OPEN"}).to_list(length=100)
-            
-            for t in open_trades:
-                coin_base = t['symbol'].split('/')[0].lower()
-                if coin_base in price_map:
-                    curr_p = price_map[coin_base]
-                    entry = t['entry_price']
+                    open_trades = await trades_collection.find({"status": "OPEN"}).to_list(length=100)
                     
-                    # Agar Buy/Long trade hai aur price thoda bhi upar gaya, SL ko entry par shift kar do (Risk-Free)
-                    if t['side'] == 'BUY' and curr_p >= entry * 1.01: # 1% upar jaane par
-                        if not t.get('trailing_active', False):
-                            await trades_collection.update_one(
-                                {"_id": t["_id"]},
-                                {"$set": {"stop_loss": entry, "trailing_active": True}}
-                            )
+                    for t in open_trades:
+                        coin_base = t['symbol'].split('/')[0].lower()
+                        if coin_base in price_map:
+                            curr_p = price_map[coin_base]
+                            entry = t['entry_price']
+                            
+                            if t['side'] == 'BUY' and curr_p >= entry * 1.01:
+                                if not t.get('trailing_active', False):
+                                    await trades_collection.update_one(
+                                        {"_id": t["_id"]},
+                                        {"$set": {"stop_loss": entry, "trailing_active": True}}
+                                    )
         except Exception as ex:
             print("Background Worker Error:", ex)
+            
+        await asyncio.sleep(15)
             
         await asyncio.sleep(10) # Har 10 second mein check karega
 
