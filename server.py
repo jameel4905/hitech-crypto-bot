@@ -34,12 +34,13 @@ class TradeRequest(BaseModel):
     secret_key: str
     is_futures: bool = True
 
-# 1. Live Prices API (CoinCap se 28+ coins uthane ke liye)
+# 1. Live Prices API (CoinCap se saare coins uthane ke liye)
 @app.get("/api/live-prices")
 async def get_live_prices():
     try:
         async with httpx.AsyncClient() as client_http:
-            response = await client_http.get("https://api.coincap.io/v2/assets?limit=50", timeout=5.0)
+            # Limit 200 kar di hai aur timeout 30 seconds kar diya hai taaki fail na ho
+            response = await client_http.get("https://api.coincap.io/v2/assets?limit=200", timeout=30.0)
             data = response.json()
             
             markets = []
@@ -54,6 +55,7 @@ async def get_live_prices():
                 })
             return {"status": "success", "markets": markets}
     except Exception as e:
+        print(f"Error fetching live prices: {e}") # Agar error aaye toh log mein dikhega
         fallback_markets = [
             {"symbol": "BTC/USDT", "price": "64005.74", "isUp": False},
             {"symbol": "ETH/USDT", "price": "1874.75", "isUp": False},
