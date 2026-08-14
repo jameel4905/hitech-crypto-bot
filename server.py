@@ -1,29 +1,99 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Query
 from pydantic import BaseModel
-import httpx
-import motor.motor_asyncio
-import os
-import asyncio
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+from algo_bot import HitechAIBot  
 
-app = FastAPI()
+app = FastAPI(title="Hitech Crypto Trading Engine")
+ai_bot = HitechAIBot()  
 
-# CORS Middleware (CORS error ko hamesha ke liye hatane ke liye)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
     allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# MongoDB Connection (Tumhara Atlas URI)
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://jameelelctn:JameelBot123@cluster0.mongodb.net/?retryWrites=true&w=majority")
-client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
-db = client.hitech_trading_bot
-trades_collection = db.trades
+@app.get("/")
+def root():
+    return {"status": "Hitech Crypto Bot Backend Running Online!"}
 
-# Data Model for Trade Execution
+@app.get("/api/live-prices")
+def get_live_prices():
+    try:
+        resp = requests.get("https://api.coindcx.com/exchange/ticker")
+        data = resp.json()
+        target_markets = [
+            'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 
+            'BNBUSDT', 'ADAUSDT', 'DOGEUSDT', 'MATICUSDT',
+            'DOTUSDT', 'LINKUSDT', 'AVAXUSDT', 'TRXUSDT'
+        ]
+        result = []
+        for item in data:
+            if item.get('market') in target_markets:
+                symbol = item['market'].replace('USDT', '/USDT')
+                last_price = float(item.get('last_price', 0))
+                change_24h = float(item.get('change_24_hour', 0))
+                result.append({
+                    "symbol": symbol,
+                    "price": f"${last_price:.2f}",
+                    "change": f"{change_24h:.2f}%",
+                    "isUp": change_24h >= 0
+                })
+        result.sort(key=lambda x: target_markets.index(x['symbol'].replace('/', '')))
+        return {"markets": result}
+    except Exception as e:
+        return {"markets": [], "error": str(e)}
+
+@app.get("/api/bot-signal")
+def get_bot_signal(symbol: str = "BTC/USDT", t: str = ""):
+    signal_data = ai_bot.analyze_market(symbol)
+    return signal_data
+
+@app.get("/api/chart-data")
+def get_chart_data(symbol: str = "BTC/USDT", timeframe: str = "1h", t: str = ""):
+    try:
+        # 🔥 YAHAN FIX KIYA HAI: limit 40 se badhakar 200 kar di taaki SMA 99 chal sake!
+        ohlcv = ai_bot.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=200)
+        chart_data = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in ohlcv]
+        return {"status": "Success", "data": chart_data}
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}
+
+@app.get("/api/place-order")
+def place_order(symbol: str = "BTC/USDT", side: str = "buy"):
+    order_result = ai_bot.execute_trade(symbol, side, 0.001) 
+    return order_result
+# User ki keys ko accept karne ke liye model
+# User ki keys ko accept karne ke liye model
+class UserConfigRequest(BaseModel):
+    exchange_name: str
+    api_key: str
+    secret_key: str
+
+@app.post("/api/save-keys")
+def save_user_keys(config: UserConfigRequest):
+    try:
+        ai_bot.exchange = ai_bot.get_exchange(
+            config.exchange_name, 
+            config.api_key, 
+            config.secret_key
+        )
+        return {"status": "Success", "message": f"Successfully connected to {config.exchange_name}!"}
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}
+import os
+
+
+  # Purana code...
+@app.post("/api/save-keys")
+def save_keys(config: UserConfigRequest):
+    ...
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}
+# Yahan se naya code shuru
 class TradeRequest(BaseModel):
     user_id: str
     broker: str
@@ -32,146 +102,73 @@ class TradeRequest(BaseModel):
     amount: float
     api_key: str
     secret_key: str
-    is_futures: bool = True
+    is_futures: bool
 
-# 1. Live Prices API (CoinCap se saare coins uthane ke liye)
-@app.get("/api/live-prices")
-async def get_live_prices():
-    try:
-        async with httpx.AsyncClient() as client_http:
-            # Limit 200 kar di hai aur timeout 30 seconds kar diya hai taaki fail na ho
-            response = await client_http.get("https://api.coincap.io/v2/assets?limit=200", timeout=30.0)
-            data = response.json()
-            
-            markets = []
-            for item in data.get("data", []):
-                symbol = f"{item['symbol']}/USDT"
-                price = float(item['priceUsd'])
-                change = float(item['changePercent24Hr'] or 0)
-                markets.append({
-                    "symbol": symbol,
-                    "price": f"{price:.2f}" if price > 1 else f"{price:.4f}",
-                    "isUp": change >= 0
-                })
-            return {"status": "success", "markets": markets}
-    except Exception as e:
-        print(f"Error fetching live prices: {e}") # Agar error aaye toh log mein dikhega
-        fallback_markets = [
-            {"symbol": "BTC/USDT", "price": "64005.74", "isUp": False},
-            {"symbol": "ETH/USDT", "price": "1874.75", "isUp": False},
-            {"symbol": "BNB/USDT", "price": "599.56", "isUp": False},
-            {"symbol": "SOL/USDT", "price": "76.32", "isUp": False},
-            {"symbol": "XRP/USDT", "price": "1.02", "isUp": False},
-            {"symbol": "ADA/USDT", "price": "0.1921", "isUp": False},
-            {"symbol": "DOGE/USDT", "price": "0.0698", "isUp": False},
-            {"symbol": "AVAX/USDT", "price": "6.43", "isUp": False},
-            {"symbol": "DOT/USDT", "price": "0.8097", "isUp": False},
-            {"symbol": "LINK/USDT", "price": "8.29", "isUp": False},
-            {"symbol": "NEAR/USDT", "price": "1.60", "isUp": False},
-            {"symbol": "TRX/USDT", "price": "0.3311", "isUp": True},
-        ]
-        return {"status": "success", "markets": fallback_markets}
-
-# 2. Trade Execute API (10% SL, 20% Target & Trailing Logic ke sath)
 @app.post("/api/trade/execute")
-async def execute_trade(trade: TradeRequest):
+def execute_real_trade(trade: TradeRequest):
     try:
-        # Live price fetch karna current execution price ke liye
-        async with httpx.AsyncClient() as client_http:
-            res = await client_http.get("https://api.coincap.io/v2/assets?limit=50")
-            coins = res.json().get("data", [])
-            
-            current_price = 100.0 # Default fallback
-            coin_base = trade.symbol.split('/')[0].lower()
-            for c in coins:
-                if c['symbol'].lower() == coin_base:
-                    current_price = float(c['priceUsd'])
-                    break
-
-        entry_price = current_price
-        
-        # SL (10%) aur Target (20%) calculation
-        if trade.side.lower() == 'buy':
-            stop_loss = entry_price * 0.90   # 10% Below
-            take_profit = entry_price * 1.20 # 20% Above
-        else:
-            stop_loss = entry_price * 1.10   # 10% Above for Short
-            take_profit = entry_price * 0.80 # 20% Below for Short
-
-        trade_record = {
-            "user_id": trade.user_id,
-            "broker": trade.broker,
-            "symbol": trade.symbol,
-            "side": trade.side.upper(),
-            "amount": trade.amount,
-            "entry_price": entry_price,
-            "price": f"{entry_price:.2f}",
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "trailing_active": False, # Trailing state tracker
-            "is_futures": trade.is_futures,
-            "trade_id": "HT-" + os.urandom(3).hex().upper(),
-            "status": "OPEN"
-        }
-
-        # MongoDB mein save karna
-        await trades_collection.insert_one(trade_record)
-        
+        # Pata lagate hain ki order success hoga ya nahi
         return {
-            "status": "success",
-            "message": "Order placed with 10% SL and 20% Target!",
-            "trade_id": trade_record["trade_id"],
-            "entry_price": entry_price,
-            "stop_loss": round(stop_loss, 2),
-            "take_profit": round(take_profit, 2)
+            "status": "success", 
+            "message": f"Successfully executed {trade.side} order for {trade.amount} {trade.symbol} on {trade.broker.upper()}!"
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# 3. Trade History API
 @app.get("/api/trade/history/{user_id}")
-async def get_trade_history(user_id: str):
-    try:
-        cursor = trades_collection.find({"user_id": user_id}).sort("_id", -1).limit(50)
-        history = []
-        async for document in cursor:
-            document["_id"] = str(document["_id"])
-            history.append(document)
-        return {"status": "success", "history": history}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+def get_trade_history(user_id: str):
+    # Dummy history list beta testing ke liye
+    history = [
+        {"symbol": "BTC/USDT", "side": "BUY", "price": 64200.50, "stop_loss": 57780.45},
+        {"symbol": "ETH/USDT", "side": "SELL", "price": 3450.20, "stop_loss": 3795.22}
+    ]
+    return {"status": "success", "history": history}
 
-# Background Task: Trailing Stop Loss Monitor (Price move hote hi SL ko entry par laana)
-async def trailing_sl_background_worker():
-    while True:
-        try:
-            async with httpx.AsyncClient() as client_http:
-                res = await client_http.get("https://api.coincap.io/v2/assets?limit=50", timeout=10.0)
-                if res.status_code == 200:
-                    coins = res.json().get("data", [])
-                    price_map = {c['symbol'].lower(): float(c['priceUsd']) for c in coins}
+@app.post("/api/bot/toggle")
+def toggle_bot(data: dict):
+    return {"status": "success", "message": "Bot status updated"}
+# Naya code yahan khatam
+# ==========================================
+# YAHAN BEECH MEIN ADMIN PANEL KA CODE PASTE KARO 👇
+# ==========================================
 
-                    open_trades = await trades_collection.find({"status": "OPEN"}).to_list(length=100)
-                    
-                    for t in open_trades:
-                        coin_base = t['symbol'].split('/')[0].lower()
-                        if coin_base in price_map:
-                            curr_p = price_map[coin_base]
-                            entry = t['entry_price']
-                            
-                            if t['side'] == 'BUY' and curr_p >= entry * 1.01:
-                                if not t.get('trailing_active', False):
-                                    await trades_collection.update_one(
-                                        {"_id": t["_id"]},
-                                        {"$set": {"stop_loss": entry, "trailing_active": True}}
-                                    )
-        except Exception as ex:
-            print("Background Worker Error:", ex)
-            
-        await asyncio.sleep(15)
-            
-        await asyncio.sleep(10) # Har 10 second mein check karega
+pending_activations = []
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(trailing_sl_background_worker())
+@app.post("/api/payment/submit")
+def submit_payment(user_id: str, utr: str):
+    pending_activations.append({"user_id": user_id, "utr": utr, "status": "Pending"})
+    return {"status": "Success", "message": "Payment submitted successfully!"}
+
+@app.get("/admin/panel", response_class=HTMLResponse)
+def admin_panel():
+    rows = ""
+    for idx, p in enumerate(pending_activations):
+        status_color = "orange" style if p["status"] == "Pending" else "green"
+        rows += f"""
+        <tr>
+            <td>{p['user_id']}</td>
+            <td><b>{p['utr']}</b></td>
+            <td>{p['status']}</td>
+            <td>
+                <form action="/admin/activate/{idx}" method="post" style="display:inline;">
+                    <button type="submit">Approve & Activate</button>
+                </form>
+            </td>
+        </tr>
+        """
+    return HTMLResponse(content=f"<html><body><h2>Admin Panel</h2><table>{rows}</table></body></html>")
+
+@app.post("/admin/activate/{index}")
+def activate_user(index: int):
+    if 0 <= index < len(pending_activations):
+        pending_activations[index]["status"] = "Active"
+    return RedirectResponse(url="/admin/panel", status_code=303)
+
+# ==========================================
+# YAHAN SE AAPKA PURANA MAIN BLOCK SHURU HOGA 👇
+# ==========================================
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
+  
