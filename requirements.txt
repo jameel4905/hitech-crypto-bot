@@ -4,13 +4,7 @@ requests
 ccxt
 pymongo
 dnspython
-fastapi
-uvicorn
 httpx
 motor
-fastapi
-uvicorn
 pydantic
-ccxt
 pandas
-requests
