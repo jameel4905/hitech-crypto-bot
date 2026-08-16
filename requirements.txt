@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-requests
 ccxt
+requests
 pymongo
 dnspython
 httpx
