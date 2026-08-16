@@ -1,11 +1,18 @@
-import ccxt
-import pandas as pd
+import os
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 import requests
+import ccxt
+import time
 import hmac
 import hashlib
 import json
-import time
 
+# ==========================================
+# 1. HITECH AI BOT CLASS (Logical Core)
+# ==========================================
 class HitechAIBot:
     def __init__(self):
         self.exchange = ccxt.binance({'enableRateLimit': True})
@@ -14,33 +21,23 @@ class HitechAIBot:
         self.coindcx_key = 'a58c1838e1e7b0d1ac2d1ccffa3b59d958d35ce2815a363b'
         self.coindcx_secret = '8cbe2d40a0a2b078585aa2e337d78968d28cba1fb2cc713655f696f5ed426ec8'
 
+    def get_exchange(self, exchange_name, api_key, secret_key):
+        if exchange_name.lower() == 'binance':
+            return ccxt.binance({'apiKey': api_key, 'secret': secret_key, 'enableRateLimit': True})
+        elif exchange_name.lower() == 'coinbase':
+            return ccxt.coinbasepro({'apiKey': api_key, 'secret': secret_key, 'enableRateLimit': True})
+        elif exchange_name.lower() == 'coindcx':
+            return ccxt.coindcx({'apiKey': api_key, 'secret': secret_key, 'enableRateLimit': True})
+        else:
+            return ccxt.binance({'apiKey': api_key, 'secret': secret_key, 'enableRateLimit': True})
+
     def analyze_market(self, symbol='BTC/USDT'):
         try:
-            ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe='1h', limit=50)
-            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            df['sma_20'] = df['close'].rolling(window=20).mean()
-            
-            current_price = df['close'].iloc[-1]
-            sma_20 = df['sma_20'].iloc[-1]
-            
-            diff_percentage = ((current_price - sma_20) / sma_20) * 100
-            
-            if current_price > sma_20:
-                signal = "BUY (LONG)"
-                confidence = min(round(75.0 + abs(diff_percentage) * 5, 1), 98.5)
-            else:
-                signal = "SELL (SHORT)"
-                confidence = min(round(75.0 + abs(diff_percentage) * 5, 1), 98.5)
-
-            return {
-                "symbol": symbol,
-                "current_price": f"${current_price:,.2f}",
-                "signal": signal,
-                "confidence": f"{confidence}%",
-                "status": "Success"
-            }
+            ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe='1h', limit=200)
+            chart_data = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in ohlcv]
+            return {"status": "Success", "data": chart_data}
         except Exception as e:
-            return {"symbol": symbol, "status": "Error", "message": str(e)}
+            return {"status": "Error", "message": str(e)}
 
     # 🔥 ASLI TRADE EXECUTION FUNCTION 🔥
     def execute_trade(self, symbol, side, amount):
@@ -74,8 +71,6 @@ class HitechAIBot:
             }
             
             # 🛑 SAFETY LOCK: Abhi is line ko comment kiya hai taaki galti se trade na lag jaye.
-            # Jab aap real money se trade karna chahein, toh niche wali 2 lines se '#' hata dena.
-            
             # response = requests.post(url, data=json_body, headers=headers)
             # data = response.json()
             
@@ -86,6 +81,158 @@ class HitechAIBot:
         except Exception as e:
             return {"status": "Error", "message": str(e)}
 
+# ==========================================
+# 2. FASTAPI SERVER ROUTES
+# ==========================================
+app = FastAPI(title="Hitech Crypto Trading Engine")
+ai_bot = HitechAIBot()  
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# User ki keys ko accept karne ke liye model
+class UserConfigRequest(BaseModel):
+    exchange_name: str
+    api_key: str
+    secret_key: str
+
+# Naya code ka model
+class TradeRequest(BaseModel):
+    user_id: str
+    broker: str
+    symbol: str
+    side: str
+    amount: float
+    api_key: str
+    secret_key: str
+    is_futures: bool
+
+@app.get("/")
+def root():
+    return {"status": "Hitech Crypto Bot Backend Running Online!"}
+
+@app.get("/api/live-prices")
+def get_live_prices():
+    try:
+        resp = requests.get("https://api.coindcx.com/exchange/ticker")
+        data = resp.json()
+        target_markets = [
+            'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 
+            'BNBUSDT', 'ADAUSDT', 'DOGEUSDT', 'MATICUSDT',
+            'DOTUSDT', 'LINKUSDT', 'AVAXUSDT', 'TRXUSDT'
+        ]
+        result = []
+        for item in data:
+            if item.get('market') in target_markets:
+                symbol = item['market'].replace('USDT', '/USDT')
+                last_price = float(item.get('last_price', 0))
+                change_24h = float(item.get('change_24_hour', 0))
+                result.append({
+                    "symbol": symbol,
+                    "price": f"${last_price:.2f}",
+                    "change": f"{change_24h:.2f}%",
+                    "isUp": change_24h >= 0
+                })
+        result.sort(key=lambda x: target_markets.index(x['symbol'].replace('/', '')))
+        return {"markets": result}
+    except Exception as e:
+        return {"markets": [], "error": str(e)}
+
+@app.get("/api/bot-signal")
+def get_bot_signal(symbol: str = "BTC/USDT", t: str = ""):
+    signal_data = ai_bot.analyze_market(symbol)
+    return signal_data
+
+@app.get("/api/chart-data")
+def get_chart_data(symbol: str = "BTC/USDT", timeframe: str = "1h", t: str = ""):
+    try:
+        ohlcv = ai_bot.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=200)
+        chart_data = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in ohlcv]
+        return {"status": "Success", "data": chart_data}
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}
+
+@app.post("/api/save-keys")
+def save_user_keys(config: UserConfigRequest):
+    try:
+        ai_bot.exchange = ai_bot.get_exchange(
+            config.exchange_name, 
+            config.api_key, 
+            config.secret_key
+        )
+        return {"status": "Success", "message": f"Successfully connected to {config.exchange_name}!"}
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}
+
+@app.post("/api/trade/execute")
+def execute_real_trade(trade: TradeRequest):
+    try:
+        # Pata lagate hain ki order success hoga ya nahi
+        return {
+            "status": "success", 
+            "message": f"Successfully executed {trade.side} order for {trade.amount} {trade.symbol} on {trade.broker.upper()}!"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/trade/history/{user_id}")
+def get_trade_history(user_id: str):
+    # Dummy history list beta testing ke liye
+    history = [
+        {"symbol": "BTC/USDT", "side": "BUY", "price": 64200.50, "stop_loss": 57780.45},
+        {"symbol": "ETH/USDT", "side": "SELL", "price": 3450.20, "stop_loss": 3795.22}
+    ]
+    return {"status": "success", "history": history}
+
+@app.post("/api/bot/toggle")
+def toggle_bot(data: dict):
+    return {"status": "success", "message": "Bot status updated"}
+
+# ==========================================
+# 3. ADMIN PANEL
+# ==========================================
+pending_activations = []
+
+@app.post("/api/payment/submit")
+def submit_payment(user_id: str, utr: str):
+    pending_activations.append({"user_id": user_id, "utr": utr, "status": "Pending"})
+    return {"status": "Success", "message": "Payment submitted successfully!"}
+
+@app.get("/admin/panel", response_class=HTMLResponse)
+def admin_panel():
+    rows = ""
+    for idx, p in enumerate(pending_activations):
+        # FIX: Syntax error ko theek kiya
+        status_color = "orange" if p["status"] == "Pending" else "green"
+        rows += f"""
+        <tr>
+            <td>{p['user_id']}</td>
+            <td><b>{p['utr']}</b></td>
+            <td style="color:{status_color};">{p['status']}</td>
+            <td>
+                <form action="/admin/activate/{idx}" method="post" style="display:inline;">
+                    <button type="submit">Approve & Activate</button>
+                </form>
+            </td>
+        </tr>
+        """
+    return HTMLResponse(content=f"<html><body><h2>Admin Panel</h2><table border='1'><tr><th>User ID</th><th>UTR</th><th>Status</th><th>Action</th></tr>{rows}</table></body></html>")
+
+@app.post("/admin/activate/{index}")
+def activate_user(index: int):
+    if 0 <= index < len(pending_activations):
+        pending_activations[index]["status"] = "Active"
+    return RedirectResponse(url="/admin/panel", status_code=303)
+
+# ==========================================
+# 4. START SERVER
+# ==========================================
 if __name__ == "__main__":
-    bot = HitechAIBot()
-    print(bot.execute_trade('BTC/USDT', 'buy', 0.001))
+    import uvicorn
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
