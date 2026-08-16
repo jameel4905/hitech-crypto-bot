@@ -178,29 +178,36 @@ def get_live_pattern(symbol: str = "BTC/USDT"):
 @app.get("/api/live-prices")
 def get_live_prices():
     try:
+        # Hum CoinDCX ki API se saare coins ka live data mangwa rahe hain
         resp = requests.get("https://api.coindcx.com/exchange/ticker")
         data = resp.json()
-        target_markets = [
-            'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 
-            'BNBUSDT', 'ADAUSDT', 'DOGEUSDT', 'MATICUSDT',
-            'DOTUSDT', 'LINKUSDT', 'AVAXUSDT', 'TRXUSDT'
-        ]
+        
         result = []
         for item in data:
-            if item.get('market') in target_markets:
-                symbol = item['market'].replace('USDT', '/USDT')
+            market = item.get('market', '')
+            
+            # CONDITION: Hum sirf wo coins dikhayenge jinke aakhir mein "USDT" aata hai
+            if market.endswith('USDT'):
+                # 'BTCUSDT' ko 'BTC/USDT' banayenge chart ke liye
+                symbol = market.replace('USDT', '/USDT')
+                
+                # Prices ko nikalna aur format karna
                 last_price = float(item.get('last_price', 0))
                 change_24h = float(item.get('change_24_hour', 0))
+                
                 result.append({
                     "symbol": symbol,
-                    "price": f"${last_price:.2f}",
+                    "price": f"${last_price:,.4f}",
                     "change": f"{change_24h:.2f}%",
                     "isUp": change_24h >= 0
                 })
-        result.sort(key=lambda x: target_markets.index(x['symbol'].replace('/', '')))
-        return {"markets": result}
+        
+        # List ko A, B, C ke hisaab se line mein lagana (A to Z)
+        result = sorted(result, key=lambda x: x['symbol'])
+        
+        return result
     except Exception as e:
-        return {"markets": [], "error": str(e)}
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/bot-signal")
 def get_bot_signal(symbol: str = "BTC/USDT", t: str = ""):
