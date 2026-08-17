@@ -258,7 +258,27 @@ def get_trade_history(user_id: str):
 @app.post("/api/bot/toggle")
 def toggle_bot(data: dict):
     return {"status": "success", "message": "Bot status updated"}
+# 🛡️ EMERGENCY KILL SWITCH LOGIC 🛡️
+    def check_daily_limit(self, user_id, daily_loss_limit=50):
+        # 1. Aaj ke saare trades ka PnL nikalna (Realized PnL)
+        # Note: Yeh function exchange ki API se fetch karega ki aaj kitna loss/profit hua
+        balance_info = self.exchange.fetch_balance()
+        # Yahan hum simplified logic laga rahe hain jo aaj ka total PnL check karega
+        total_pnl = self.get_today_pnl(user_id) 
+        
+        if total_pnl <= -daily_loss_limit:
+            # Panic Mode ON!
+            self.close_all_open_positions()
+            return {"status": "emergency_stopped", "message": "Daily loss limit reached! All positions closed."}
+        
+        return {"status": "safe", "current_pnl": total_pnl}
 
+    def close_all_open_positions(self):
+        # Saare open trades ko close karne ka order
+        positions = self.exchange.fetch_positions()
+        for pos in positions:
+            if float(pos['contracts']) > 0:
+                self.exchange.create_order(pos['symbol'], 'market', 'sell', pos['contracts'])
 # ==========================================
 # 3. ADMIN PANEL
 # ==========================================
