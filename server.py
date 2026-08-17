@@ -9,7 +9,11 @@ import time
 import hmac
 import hashlib
 import json
-
+@app.get("/api/safety/check")
+def check_safety(user_id: str = "jameel_pro_user"):
+    # Default $50 ka limit rakha hai, isko aap settings se badal sakte ho
+    result = ai_bot.check_daily_limit(user_id, daily_loss_limit=50)
+    return result
 # ==========================================
 # 1. HITECH AI BOT CLASS (Logical Core)
 # ==========================================
