@@ -94,7 +94,7 @@ class HitechAIBot:
 
 
 # ==========================================
-# 2. FASTAPI SERVER INITIALIZATION (FIXED)
+# 2. FASTAPI SERVER INITIALIZATION
 # ==========================================
 app = FastAPI(title="Hitech Crypto Trading Engine")
 ai_bot = HitechAIBot()  
@@ -232,27 +232,20 @@ def emergency_stop(user_id: str = "jameel_pro_user"):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# Yahan se naya verification route shuru hota hai (bilkul alag block)
+# 🔑 LICENSE KEY VERIFICATION ROUTE
 valid_keys = {"HITECH-123", "PRO-JAMEEL-99"}
 
 @app.post("/api/verify-key")
 def verify_key(data: dict):
-    user_key = data.get("key")
-    if user_key in valid_keys:
-        return {"status": "success", "message": "Bot Activated!"}
-    return {"status": "error", "message": "Invalid Key"}
-    @app.post("/api/trade/exit")
-def exit_trade(data: dict):
     try:
-        symbol = data.get("symbol")
-        user_id = data.get("user_id")
-        # Yahan exchange par order square-off karne ka CCXT logic aayega
-        return {
-            "status": "success",
-            "message": f"Successfully exited trade for {symbol}"
-        }
+        user_key = data.get("key")
+        if user_key in valid_keys:
+            return {"status": "success", "message": "Bot Activated!"}
+        return {"status": "error", "message": "Invalid Key"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+# 🛑 TRADE EXIT / SQUARE-OFF ROUTE
 @app.post("/api/trade/exit")
 def exit_trade(data: dict):
     try:
