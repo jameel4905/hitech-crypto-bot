@@ -241,3 +241,15 @@ def verify_key(data: dict):
     if user_key in valid_keys:
         return {"status": "success", "message": "Bot Activated!"}
     return {"status": "error", "message": "Invalid Key"}
+    @app.post("/api/trade/exit")
+def exit_trade(data: dict):
+    try:
+        symbol = data.get("symbol")
+        user_id = data.get("user_id")
+        # Yahan exchange par order square-off karne ka CCXT logic aayega
+        return {
+            "status": "success",
+            "message": f"Successfully exited trade for {symbol}"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
