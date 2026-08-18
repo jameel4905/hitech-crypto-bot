@@ -201,13 +201,130 @@ def execute_real_trade(trade: TradeRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/trade/history/{user_id}")
-def get_trade_history(user_id: str):
-    history = [
-        {"symbol": "BTC/USDT", "side": "BUY", "price": 64200.50, "stop_loss": 57780.45},
-        {"symbol": "ETH/USDT", "side": "SELL", "price": 3450.20, "stop_loss": 3795.22}
-    ]
-    return {"status": "success", "history": history}
+
+# 💰@app.post("/api/portfolio/balance")
+def get_real_portfolio(data: dict):
+    try:
+        exchange_name = data.get("broker", "binance")
+        api_key = data.get("api_key")
+        secret_key = data.get("secret_key")
+
+        if not api_key or not secret_key:
+            return {"status": "success", "balance": "$0.00", "history": []}
+
+        # Agar user ne COINDCX select kiya hai
+        if exchange_name.lower() == 'coindcx':
+            secret_bytes = bytes(secret_key, encoding='utf-8')
+            ts = int(round(time.time() * 1000))
+            body = {"timestamp": ts}
+            json_body = json.dumps(body)
+            
+            signature = hmac.new(secret_bytes, json_body.encode(), hashlib.sha256).hexdigest()
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'X-AUTH-APIKEY': api_key,
+                'X-AUTH-SIGNATURE': signature
+            }
+            
+            # 1. User ke saare balances fetch karo
+            response = requests.post('https://api.coindcx.com/exchange/v1/users/balances', data=json_body, headers=headers)
+            balances = response.json()
+            
+            # 2. Live ticker prices fetch karo taaki total value calculate ho sake
+            ticker_resp = requests.get('https://api.coindcx.com/exchange/ticker')
+            tickers = ticker_resp.json()
+            price_map = {}
+            for t in tickers:
+                market = t.get('market', '')
+                price_map[market] = float(t.get('last_price', 0))
+
+            total_portfolio_value_inr = 0.0
+            active_assets = []
+
+            if isinstance(balances, list):
+                for b in balances:
+                    currency = b.get('currency', '')
+                    balance_qty = float(b.get('balance', 0.0))
+                    locked_qty = float(b.get('locked', 0.0))
+                    total_qty = balance_qty + locked_qty
+
+                    if total_qty > 0:
+                        # Agar currency INR hai
+                        if currency == 'INR':
+                            total_portfolio_value_inr += total_qty
+                            active_assets.append({"symbol": "INR", "side": "HOLD", "price": total_qty})
+                        else:
+                            # Dusre coins ke liye USDT ya INR price nikalo
+                            market_usdt = f"{currency}USDT"
+                            market_inr = f"{currency}INR"
+                            
+                            coin_price_inr = 0.0
+                            if market_inr in price_map:
+                                coin_price_inr = price_map[market_inr]
+                            elif market_usdt in price_map and 'USDTINR' in price_map:
+                                coin_price_inr = price_map[market_usdt] * price_map['USDTINR']
+
+                            asset_value_inr = total_qty * coin_price_inr
+                            total_portfolio_value_inr += asset_value_inr
+                            
+                            if asset_value_inr > 1: # Sirf unko dikhao jinki value 1 INR se zyada ho
+                                active_assets.append({
+                                    "symbol": f"{currency}/USDT",
+                                    "side": f"Qty: {total_qty:.4f}",
+                                    "price": f"₹{asset_value_inr:,.2f}"
+                                })
+
+            # INR ko USD ($) mein convert karlo (Approx 1 USD = 83 INR, ya direct INR mein dikhao)
+            total_portfolio_value_usd = total_portfolio_value_inr / 83.0
+
+            return {
+                "status": "success",
+                "balance": f"${total_portfolio_value_usd:,.2f} (₹{total_portfolio_value_inr:,.2f})",
+                "history": active_assets
+            }
+        else:
+            # Binance ya dusre exchanges ke liye CCXT
+            exchange = ai_bot.get_exchange(exchange_name, api_key, secret_key)
+            balance = exchange.fetch_balance()
+            total_usdt = balance.get('total', {}).get('USDT', 0.0)
+            
+            return {
+                "status": "success",
+                "balance": f"${total_usdt:,.2f}",
+                "history": []
+            }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "balance": "$0.00", "history": []}
+
+
+# 🛑 TRADE EXIT / SQUARE-OFF ROUTE
+@app.post("/api/trade/exit")
+def exit_trade(data: dict):
+    try:
+        exchange_name = data.get("broker", "binance")
+        api_key = data.get("api_key")
+        secret_key = data.get("secret_key")
+        symbol = data.get("symbol")
+        order_id = data.get("order_id")
+
+        if not api_key or not secret_key:
+            return {"status": "error", "message": "API keys missing"}
+
+        exchange = ai_bot.get_exchange(exchange_name, api_key, secret_key)
+        
+        if order_id:
+            exchange.cancel_order(order_id, symbol)
+        else:
+            exchange.load_markets()
+
+        return {
+            "status": "success",
+            "message": f"Successfully exited and squared off trade for {symbol}"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 # 🛡️ SAFETY & EMERGENCY KILL SWITCH ENDPOINTS
 @app.get("/api/safety/check")
@@ -232,6 +349,7 @@ def emergency_stop(user_id: str = "jameel_pro_user"):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 # 🔑 LICENSE KEY VERIFICATION ROUTE
 valid_keys = {"HITECH-123", "PRO-JAMEEL-99"}
 
@@ -245,15 +363,11 @@ def verify_key(data: dict):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# 🛑 TRADE EXIT / SQUARE-OFF ROUTE
-@app.post("/api/trade/exit")
-def exit_trade(data: dict):
-    try:
-        symbol = data.get("symbol")
-        user_id = data.get("user_id")
-        return {
-            "status": "success",
-            "message": f"Successfully exited trade for {symbol}"
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# 5. START SERVER
+# ==========================================
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
