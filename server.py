@@ -229,6 +229,14 @@ def emergency_stop(user_id: str = "jameel_pro_user"):
             "status": "emergency_stopped",
             "message": "EMERGENCY: All positions have been successfully closed!"
         }
+        valid_keys = {"HITECH-123", "PRO-JAMEEL-99"}
+
+@app.post("/api/verify-key")
+def verify_key(data: dict):
+    user_key = data.get("key")
+    if user_key in valid_keys:
+        return {"status": "success", "message": "Bot Activated!"}
+    return {"status": "error", "message": "Invalid Key"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
