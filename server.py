@@ -202,7 +202,8 @@ def execute_real_trade(trade: TradeRequest):
         return {"status": "error", "message": str(e)}
 
 
-# 💰@app.post("/api/portfolio/balance")
+# 💰 REAL PORTFOLIO & BALANCE ROUTE (COINDCX & BINANCE SUPPORT)
+@app.post("/api/portfolio/balance")
 def get_real_portfolio(data: dict):
     try:
         exchange_name = data.get("broker", "binance")
@@ -268,14 +269,13 @@ def get_real_portfolio(data: dict):
                             asset_value_inr = total_qty * coin_price_inr
                             total_portfolio_value_inr += asset_value_inr
                             
-                            if asset_value_inr > 1: # Sirf unko dikhao jinki value 1 INR se zyada ho
+                            if asset_value_inr > 1:
                                 active_assets.append({
                                     "symbol": f"{currency}/USDT",
                                     "side": f"Qty: {total_qty:.4f}",
                                     "price": f"₹{asset_value_inr:,.2f}"
                                 })
 
-            # INR ko USD ($) mein convert karlo (Approx 1 USD = 83 INR, ya direct INR mein dikhao)
             total_portfolio_value_usd = total_portfolio_value_inr / 83.0
 
             return {
