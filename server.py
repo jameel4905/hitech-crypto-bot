@@ -229,7 +229,11 @@ def emergency_stop(user_id: str = "jameel_pro_user"):
             "status": "emergency_stopped",
             "message": "EMERGENCY: All positions have been successfully closed!"
         }
-        valid_keys = {"HITECH-123", "PRO-JAMEEL-99"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# Yahan se naya verification route shuru hota hai (bilkul alag block)
+valid_keys = {"HITECH-123", "PRO-JAMEEL-99"}
 
 @app.post("/api/verify-key")
 def verify_key(data: dict):
@@ -237,54 +241,3 @@ def verify_key(data: dict):
     if user_key in valid_keys:
         return {"status": "success", "message": "Bot Activated!"}
     return {"status": "error", "message": "Invalid Key"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.post("/api/bot/toggle")
-def toggle_bot(data: dict):
-    return {"status": "success", "message": "Bot status updated"}
-
-
-# ==========================================
-# 5. ADMIN PANEL
-# ==========================================
-pending_activations = []
-
-@app.post("/api/payment/submit")
-def submit_payment(user_id: str, utr: str):
-    pending_activations.append({"user_id": user_id, "utr": utr, "status": "Pending"})
-    return {"status": "Success", "message": "Payment submitted successfully!"}
-
-@app.get("/admin/panel", response_class=HTMLResponse)
-def admin_panel():
-    rows = ""
-    for idx, p in enumerate(pending_activations):
-        status_color = "orange" if p["status"] == "Pending" else "green"
-        rows += f"""
-        <tr>
-            <td>{p['user_id']}</td>
-            <td><b>{p['utr']}</b></td>
-            <td style="color:{status_color};">{p['status']}</td>
-            <td>
-                <form action="/admin/activate/{idx}" method="post" style="display:inline;">
-                    <button type="submit">Approve & Activate</button>
-                </form>
-            </td>
-        </tr>
-        """
-    return HTMLResponse(content=f"<html><body><h2>Admin Panel</h2><table border='1'><tr><th>User ID</th><th>UTR</th><th>Status</th><th>Action</th></tr>{rows}</table></body></html>")
-
-@app.post("/admin/activate/{index}")
-def activate_user(index: int):
-    if 0 <= index < len(pending_activations):
-        pending_activations[index]["status"] = "Active"
-    return RedirectResponse(url="/admin/panel", status_code=303)
-
-
-# ==========================================
-# 6. START SERVER
-# ==========================================
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 5000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
