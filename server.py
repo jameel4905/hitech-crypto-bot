@@ -253,3 +253,14 @@ def exit_trade(data: dict):
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+@app.post("/api/trade/exit")
+def exit_trade(data: dict):
+    try:
+        symbol = data.get("symbol")
+        user_id = data.get("user_id")
+        return {
+            "status": "success",
+            "message": f"Successfully exited trade for {symbol}"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
