@@ -268,7 +268,7 @@ def get_real_portfolio(data: dict):
         return {"status": "error", "message": str(e), "balance": "$0.00", "history": []}
 
 
-# 🛑 REAL TRADE EXIT / SQUARE-OFF ROUTE (FIXED FOR COINDCX)
+# 🛑 REAL TRADE EXIT / SQUARE-OFF ROUTE (FIXED FOR COINDCX STEP/PRECISION)
 @app.post("/api/trade/exit")
 def exit_trade(data: dict):
     broker = data.get("broker", "coindcx").lower()
@@ -291,19 +291,37 @@ def exit_trade(data: dict):
             signature = hmac.new(secret_bytes, json_body.encode(), hashlib.sha256).hexdigest()
             headers = {'Content-Type': 'application/json', 'X-AUTH-APIKEY': api_key, 'X-AUTH-SIGNATURE': signature}
             
+            # 1. User ka balance fetch karo
             resp = requests.post('https://api.coindcx.com/exchange/v1/users/balances', data=json_body, headers=headers)
             balances = resp.json()
             
-            sell_qty = 0.0
+            raw_qty = 0.0
             if isinstance(balances, list):
                 for b in balances:
                     if b.get('currency') == base_currency:
-                        sell_qty = float(b.get('balance', 0.0)) + float(b.get('locked', 0.0))
+                        raw_qty = float(b.get('balance', 0.0))
                         break
                     
-            if sell_qty <= 0:
+            if raw_qty <= 0:
                 return {"status": "error", "message": f"No balance for {base_currency}"}
                 
+            # 2. Market Step Size check karo (Taki Decimal error na aaye)
+            markets_resp = requests.get('https://api.coindcx.com/exchange/v1/markets_details')
+            markets_data = markets_resp.json()
+            step_size = 1.0 # Default
+            
+            for m in markets_data:
+                if m.get("coindcx_name") == market_pair:
+                    step_size = float(m.get("step", 1.0))
+                    break
+            
+            # 3. Quantity ko perfectly round down karo step size ke hisab se
+            sell_qty = round(int(raw_qty / step_size) * step_size, 8)
+            
+            if sell_qty <= 0:
+                 return {"status": "error", "message": f"Quantity too small to sell. Fixed Qty: {sell_qty}"}
+                
+            # 4. Market order place karo perfect quantity ke sath
             order_body = {
                 "timestamp": ts,
                 "order": {
@@ -320,7 +338,11 @@ def exit_trade(data: dict):
             order_resp = requests.post('https://api.coindcx.com/exchange/v1/orders/create', data=order_json, headers=order_headers)
             res_data = order_resp.json()
             
+            if order_resp.status_code != 200 or 'message' in res_data:
+                 return {"status": "error", "message": f"Exchange Error: {res_data.get('message', 'Failed')}"}
+                 
             return {"status": "success", "message": f"Sold {sell_qty} {base_currency} successfully!", "details": res_data}
+            
         else:
             exchange = ai_bot.get_exchange(broker, api_key, secret_key)
             balance = exchange.fetch_balance()
